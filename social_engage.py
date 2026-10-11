@@ -299,8 +299,13 @@ def fresh(posts, recent, me):
     return out[:25]
 
 
+class Unreplyable(Exception):
+    """Под этим постом ответить нельзя (автор ограничил ответы, пост удалён) — берём следующий."""
+
+
 def choose(net, cands, cfg, page=None):
-    """Лучший пост и ответ на основе нашей базы, прошедший проверку; или None."""
+    """Посты с ответом на основе нашей базы, прошедшим проверку, — по одному, лучший первым.
+    Генератор: если под выбранным ответить нельзя, main берёт следующий без нового выбора."""
     listing = "\n\n".join(f"[{i}] {'★ ПЛОЩАДКА · ' if p.get('hub') else ''}@{p['author']} · {p['age_h']} ч назад{(' · ' + p['stats']) if p.get('stats') else ''}\n{p['text'][:450]}" for i, p in enumerate(cands))   # короче — влезает в лимит Groq
     ch = cfg.get("ch") or "ru"
     own = ", ".join(n for n in dict.fromkeys(["launch_scout", "Launc_Scout", *(user_of(n, c) for c in ("ru", "en") for n in ("th", "x"))]) if n)
@@ -328,7 +333,8 @@ def choose(net, cands, cfg, page=None):
         for attempt in range(2):
             chk = llm(CHECK_RULES, f"FACTS:\n{ftxt}\n\nПОСТ (@{post['author']}):\n{post['text']}\n\nОТВЕТ СКАУТА:\n{reply}")
             if (chk.get("score") or 0) >= MIN_SCORE:
-                return {**post, "reply": reply, "score": chk.get("score"), "n_facts": len(facts)}
+                yield {**post, "reply": reply, "score": chk.get("score"), "n_facts": len(facts)}
+                break
             print(net, "ответ не прошёл проверку:", chk.get("score"), "·", str(chk.get("why") or "")[:140])
             if attempt == 1:
                 break
@@ -338,7 +344,6 @@ def choose(net, cands, cfg, page=None):
             reply = re.sub(r"https?://\S+", "", reply).strip()
             if not reply or len(reply) > 280:
                 break
-    return None
 
 
 DISCOVERED = []
@@ -394,7 +399,7 @@ def reply_threads(page, post, dry):
         pause(1.5, 2)
     if not clicked:
         names = page.evaluate("() => [...new Set([...document.querySelectorAll('svg title, svg[aria-label]')].map((x) => x.textContent || x.getAttribute('aria-label')))].slice(0, 20)")
-        raise Fail("Threads: нет кнопки ответа, иконки: " + ", ".join(str(n) for n in names) + " · адрес " + page.url.split("?")[0][-60:])
+        raise Unreplyable("Threads: нет кнопки ответа, иконки: " + ", ".join(str(n) for n in names[:8]))
     pause(1.5, 2.5)
     box = page.locator("[contenteditable=true]:visible").last
     box.wait_for(timeout=15000)
@@ -414,8 +419,15 @@ def reply_x(page, post, dry):
     try:
         box.wait_for(timeout=20000)
     except PwTimeout:
-        body = re.sub(r"\s+", " ", page.locator("body").inner_text()[:160])
-        raise Fail("страница поста X не открылась: " + body)
+        # Поля ответа нет: автор ограничил ответы, пост удалён или скрыт. Причина — в
+        # колонке поста, а не в начале страницы (там меню X; 2026-10-11 в отчёт шло оно).
+        col = page.locator("[data-testid='primaryColumn']").first
+        try:
+            txt = re.sub(r"\s+", " ", col.inner_text(timeout=5000))
+        except Exception:
+            txt = re.sub(r"\s+", " ", page.locator("body").inner_text())
+        m = re.search(r"[^.]{0,80}(can reply|who can reply|can.t reply|unavailable|doesn.t exist|ответить могут|недоступ)[^.]{0,60}", txt, re.I)
+        raise Unreplyable("X: " + (m.group(0).strip() if m else "нет поля ответа · " + txt[-160:]))
     if dry:
         return
     box.click()
@@ -480,11 +492,17 @@ def main():
                 raw = threads_candidates(page, 2, hl, a.ch) if net == "th" else x_candidates(2, hl, a.ch)
                 cands = fresh(raw, cfg.get("recent") or [], me)
                 print(SITES[net]["name"], "найдено:", len(raw), "· свежих кандидатов:", len(cands))
-                pick = choose(net, cands, cfg, page) if cands else None
+                pick = None
+                for cand in (choose(net, cands, cfg, page) if cands else []):
+                    try:
+                        (reply_threads if net == "th" else reply_x)(page, cand, a.dry)
+                        pick = cand
+                        break
+                    except Unreplyable as e:
+                        print(SITES[net]["name"], "ответить нельзя, беру следующий:", str(e)[:160])
                 if not pick:
                     print(SITES[net]["name"], "подходящего поста нет — пропуск")
                     continue
-                (reply_threads if net == "th" else reply_x)(page, pick, a.dry)
                 if not a.dry:
                     pick["followed"] = follow(page, net, pick["author"])
                 items.append({"net": net, "url": pick["url"], "author": pick["author"], "post_text": pick["text"][:600],
