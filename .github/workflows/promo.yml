@@ -1,0 +1,70 @@
+# Промо-ролик Скаута в Threads, Instagram (Reels) и X через веб по куки
+# (social_publish.py --promo). Пост — JSON в репозитории (тексты и ссылка на mp4
+# в релизе), запускается вручную: gh workflow run promo.yml -f post=... -f mode=dry
+name: promo
+
+on:
+  workflow_dispatch:
+    inputs:
+      post:
+        description: "JSON промо-поста в репозитории"
+        default: threads/promo_video_ru.json
+      mode:
+        description: "dry — всё, кроме последней кнопки; publish — опубликовать"
+        default: dry
+      nets:
+        description: "Сети: th,ig,x"
+        default: th,ig,x
+
+concurrency:
+  group: promo-${{ github.event.inputs.post }}
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt playwright
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-v1
+      - run: python -m playwright install --with-deps chromium
+      # Если в JSON поста есть "release": "<тег>", ролик берётся из релиза этого
+      # репозитория в папку media/ ("video": "media/<файл>.mp4").
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          POST: ${{ github.event.inputs.post }}
+        run: |
+          TAG=$(python -c "import json,os; print(json.load(open(os.environ['POST'], encoding='utf-8')).get('release', ''))")
+          if [ -n "$TAG" ]; then gh release download "$TAG" --dir media --clobber; ls -la media; fi
+      - env:
+          TH_COOKIES: ${{ secrets.TH_COOKIES }}
+          IG_COOKIES: ${{ secrets.IG_COOKIES }}
+          X_SCOUT_COOKIES: ${{ secrets.X_SCOUT_COOKIES }}
+          # Английский Скаут: в JSON промо-поста "ch": "en".
+          TH_EN_COOKIES: ${{ secrets.TH_EN_COOKIES }}
+          IG_EN_COOKIES: ${{ secrets.IG_EN_COOKIES }}
+          X_EN_COOKIES: ${{ secrets.X_EN_COOKIES }}
+          TH_USER: ${{ vars.TH_USER }}
+          IG_USER: ${{ vars.IG_USER }}
+          X_USER: ${{ vars.X_USER }}
+          TH_EN_USER: ${{ vars.TH_EN_USER }}
+          IG_EN_USER: ${{ vars.IG_EN_USER }}
+          X_EN_USER: ${{ vars.X_EN_USER }}
+          POST: ${{ github.event.inputs.post }}
+          NETS: ${{ github.event.inputs.nets }}
+          MODE: ${{ github.event.inputs.mode }}
+          # Скриншоты окна публикации (при проверке и при ошибке) — владельцу в служебный
+          # бот через Worker. Не в артефакт: репозиторий публичный, артефакты видны всем.
+          LS_INGEST_SECRET: ${{ secrets.LS_INGEST_SECRET }}
+          WORKER_URL: https://launch-scout-bot.clam83574.workers.dev
+        run: python social_publish.py --promo "$POST" --nets "$NETS" $([ "$MODE" = publish ] || echo --dry)
