@@ -38,7 +38,7 @@ import requests
 from playwright.sync_api import TimeoutError as PwTimeout
 from playwright.sync_api import sync_playwright
 
-WORKER = os.environ.get("WORKER_URL", "https://launch-scout-bot.clam83574.workers.dev")
+WORKER = os.environ.get("WORKER_URL", "https://launch-scout-bot.opsfold.workers.dev")
 SECRET = os.environ.get("LS_INGEST_SECRET", "")
 H = {"x-ingest-secret": SECRET}
 

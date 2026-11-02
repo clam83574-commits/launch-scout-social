@@ -66,5 +66,5 @@ jobs:
           # Скриншоты окна публикации (при проверке и при ошибке) — владельцу в служебный
           # бот через Worker. Не в артефакт: репозиторий публичный, артефакты видны всем.
           LS_INGEST_SECRET: ${{ secrets.LS_INGEST_SECRET }}
-          WORKER_URL: https://launch-scout-bot.clam83574.workers.dev
+          WORKER_URL: https://launch-scout-bot.opsfold.workers.dev
         run: python social_publish.py --promo "$POST" --nets "$NETS" $([ "$MODE" = publish ] || echo --dry)

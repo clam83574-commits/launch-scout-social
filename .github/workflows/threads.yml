@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 20   # Instagram до 6 мин ждём подтверждения + Threads и X
     env:
       LS_INGEST_SECRET: ${{ secrets.LS_INGEST_SECRET }}
-      WORKER_URL: https://launch-scout-bot.clam83574.workers.dev
+      WORKER_URL: https://launch-scout-bot.opsfold.workers.dev
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
